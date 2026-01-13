@@ -46,7 +46,7 @@ max_lr = 5e-4
 warmup_ratio = 0.1
 cooldown_ratio = 0.1
 min_lr = 0.1 * max_lr
-batch_size = 16
+batch_size = 4
 grad_accum_steps = 1
 seq_len = 1024
 val_freq = 250
@@ -58,20 +58,11 @@ train_dataset_path = f'{args.input_dir}/train.json'
 val_dataset_path = f'{args.input_dir}/val.json'
 save_path = args.save_dir
 
-device_type = "cuda" if device.startswith("cuda") else "cpu"
-torch.manual_seed(seed)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed(seed)
 def worker_seed_init(_):
     worker_seed = torch.initial_seed() % (2**32-1)
     np.random.seed(worker_seed)
     random.seed(worker_seed)
-torch.set_float32_matmul_precision('high')
-print(f"Save Path: {save_path}")
 
-# lr schedule
-warmup_steps = int(max_steps * warmup_ratio)
-cooldown_steps = int(max_steps * cooldown_ratio)
 def get_lr(it): # WSD schedule
     if it<warmup_steps:
         return max_lr * (it+1) / warmup_steps
@@ -79,13 +70,6 @@ def get_lr(it): # WSD schedule
         return max_lr
     return min_lr + (max_lr-min_lr) * ((max_steps-it) / cooldown_steps)
 
-# model
-model = AutoModelForCausalLM.from_pretrained('ekwek/Soprano-80M')
-tokenizer = AutoTokenizer.from_pretrained('ekwek/Soprano-80M')
-model.to(torch.bfloat16).to(device)
-model.train()
-
-# dataset
 def collate_pack(texts):
     tokens_batch = tokenizer(texts, padding=False, truncation=False)
     batch = []
@@ -110,32 +94,6 @@ def collate_pack(texts):
     x = batch[:, :-1]
     y = batch[:, 1:]
     return x, y
-
-dataset = AudioDataset(train_dataset_path)
-# we need batch_size * 16 to have enough tokens after packing
-dataloader = DataLoader(dataset,
-    batch_size=batch_size * 16,
-    shuffle=True,
-    num_workers=16,
-    pin_memory=True,
-    persistent_workers=True,
-    worker_init_fn=worker_seed_init,
-    collate_fn=collate_pack,
-)
-dataloader_it = iter(dataloader)
-val_dataset = AudioDataset(val_dataset_path)
-val_dataloader = DataLoader(val_dataset,
-    batch_size=batch_size * 16,
-    shuffle=False,
-    num_workers=1,
-    pin_memory=True,
-    persistent_workers=True,
-    worker_init_fn=worker_seed_init,
-    collate_fn=collate_pack,
-)
-
-# optimizer
-opt = torch.optim.AdamW(model.parameters(), max_lr, betas=betas, weight_decay=weight_decay, fused=True)
 
 def compute_loss(logits, y, num_steps):
     pred = logits.view(-1, logits.size(-1))
@@ -170,47 +128,93 @@ def evaluate(val_dataloader):
         print(f"validation text loss: {val_text_loss_accum.item():.4f}\tvalidation audio loss: {val_audio_loss_accum.item():.4f}\tvalidation acc: {val_acc_accum.item():.4f}")
     model.train()
 
-pbar = tqdm(range(0, max_steps), ncols=200, dynamic_ncols=True)
-for step in pbar:
-    start = time.time()
-    if val_freq>0 and (step % val_freq == 0 or step==max_steps-1):
-        evaluate(val_dataloader)
 
-    opt.zero_grad()
-    audio_loss_accum = 0.0
-    text_loss_accum = 0.0
-    acc_accum = 0.0
-    for micro_step in range(grad_accum_steps):
-        try:
-            x, y = next(dataloader_it)
-        except:
-            dataloader_it = iter(dataloader)
-            x, y = next(dataloader_it)
-        x, y = x.to(device), y.to(device)
+tokenizer = AutoTokenizer.from_pretrained('ekwek/Soprano-80M')
+if __name__ == '__main__':
+    device_type = "cuda" if device.startswith("cuda") else "cpu"
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+    torch.set_float32_matmul_precision('high')
+    print(f"Save Path: {save_path}")
 
-        with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
-            logits = model(x).logits
-            audio_loss, text_loss, acc = compute_loss(logits, y, grad_accum_steps)
-        audio_loss_accum += audio_loss.detach()
-        text_loss_accum += text_loss.detach()
-        acc_accum += acc.detach()
-        total_loss = audio_loss + text_factor*text_loss
-        total_loss.backward()
+    # lr schedule
+    warmup_steps = int(max_steps * warmup_ratio)
+    cooldown_steps = int(max_steps * cooldown_ratio)
 
-    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-    lr = get_lr(step)
-    for param_group in opt.param_groups:
-        param_group['lr'] = lr
-    opt.step()
-    torch.cuda.synchronize()
-    total_tokens = step * batch_size*seq_len*grad_accum_steps
-    end = time.time()
-    dt = (end-start)*1000
-    tokens_per_second = (batch_size*seq_len*grad_accum_steps) / (end-start)
-    tqdm_log = f'text loss: {text_loss_accum.item():.3f} | audio loss: {audio_loss_accum.item():.3f} | acc: {acc_accum.item():.4f} | lr: {lr:.2e} | norm: {norm:.3f} | time: {dt:.2f} ms | {tokens_per_second:.2f} t/s'
-    pbar.set_description(tqdm_log)
+    # model
+    model = AutoModelForCausalLM.from_pretrained('ekwek/Soprano-80M')
+    model.to(torch.bfloat16).to(device)
+    model.train()
 
-print(f"Training complete. Saving model at {save_path}")
-model.save_pretrained(save_path)
-tokenizer.save_pretrained(save_path)
-print("Saving done.")
+    # dataset
+    dataset = AudioDataset(train_dataset_path)
+    # we need batch_size * 16 to have enough tokens after packing
+    dataloader = DataLoader(dataset,
+        batch_size=batch_size * 16,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True,
+        worker_init_fn=worker_seed_init,
+        collate_fn=collate_pack,
+    )
+    dataloader_it = iter(dataloader)
+    val_dataset = AudioDataset(val_dataset_path)
+    val_dataloader = DataLoader(val_dataset,
+        batch_size=batch_size * 16,
+        shuffle=False,
+        num_workers=1,
+        pin_memory=True,
+        persistent_workers=True,
+        worker_init_fn=worker_seed_init,
+        collate_fn=collate_pack,
+    )
+
+    # optimizer
+    opt = torch.optim.AdamW(model.parameters(), max_lr, betas=betas, weight_decay=weight_decay, fused=True)
+
+    pbar = tqdm(range(0, max_steps), ncols=200, dynamic_ncols=True)
+    for step in pbar:
+        start = time.time()
+        if val_freq>0 and (step % val_freq == 0 or step==max_steps-1):
+            evaluate(val_dataloader)
+
+        opt.zero_grad()
+        audio_loss_accum = 0.0
+        text_loss_accum = 0.0
+        acc_accum = 0.0
+        for micro_step in range(grad_accum_steps):
+            try:
+                x, y = next(dataloader_it)
+            except:
+                dataloader_it = iter(dataloader)
+                x, y = next(dataloader_it)
+            x, y = x.to(device), y.to(device)
+
+            with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
+                logits = model(x).logits
+                audio_loss, text_loss, acc = compute_loss(logits, y, grad_accum_steps)
+            audio_loss_accum += audio_loss.detach()
+            text_loss_accum += text_loss.detach()
+            acc_accum += acc.detach()
+            total_loss = audio_loss + text_factor*text_loss
+            total_loss.backward()
+
+        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        lr = get_lr(step)
+        for param_group in opt.param_groups:
+            param_group['lr'] = lr
+        opt.step()
+        torch.cuda.synchronize()
+        total_tokens = step * batch_size*seq_len*grad_accum_steps
+        end = time.time()
+        dt = (end-start)*1000
+        tokens_per_second = (batch_size*seq_len*grad_accum_steps) / (end-start)
+        tqdm_log = f'text loss: {text_loss_accum.item():.3f} | audio loss: {audio_loss_accum.item():.3f} | acc: {acc_accum.item():.4f} | lr: {lr:.2e} | norm: {norm:.3f} | time: {dt:.2f} ms | {tokens_per_second:.2f} t/s'
+        pbar.set_description(tqdm_log)
+
+    print(f"Training complete. Saving model at {save_path}")
+    model.save_pretrained(save_path)
+    tokenizer.save_pretrained(save_path)
+    print("Saving done.")
