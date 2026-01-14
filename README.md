@@ -33,13 +33,51 @@
 
 ## Installation
 
+### 1. Clone repo:
 ```bash
 git clone https://github.com/ekwek1/soprano-factory.git
 cd soprano-factory
-pip install -r requirements.txt
 ```
 
-If using Windows you may need to reinstall Pytorch to have CUDA support.
+### 2. Create venv:
+```bash
+python -m venv .venv
+# or
+python3 -m venv .venv
+# or using uv
+uv venv --python 3.12
+```
+
+### 3. Activate venv:
+```bash
+source .venv/bin/activate
+# or for Windows (Command Prompt)
+.venv\Scripts\activate
+# or for Windows (PowerShell)
+.\venv\Scripts\Activate.ps1
+```
+
+### 4. Install requirements.txt
+
+#### Using pip
+
+```bash
+pip install -r requirements.txt
+# or for ROCm (AMD)
+pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/rocm6.4
+```
+
+#### Using uv
+
+```bash
+uv pip install -r requirements.txt
+# or for ROCm (AMD)
+uv pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/rocm6.4
+```
+
+**Note:** ROCm support has not been tested on Windows.
+
+If using Windows with CUDA you may need to reinstall Pytorch to have CUDA support.
 
 ---
 
