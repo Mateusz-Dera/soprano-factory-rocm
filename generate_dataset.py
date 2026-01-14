@@ -34,6 +34,10 @@ def get_args():
         default="./example_dataset",
         type=pathlib.Path
     )
+    parser.add_argument("--rocm",
+        action="store_true",
+        help="Enable ROCm compatibility (converts audio to float for AMD GPUs)"
+    )
     return parser.parse_args()
 
 def main():
@@ -62,6 +66,14 @@ def main():
         filename, transcript = sample
         sr, audio = wavfile.read(f'{input_dir}/wavs/{filename}.wav')
         audio = torch.from_numpy(audio)
+
+        # Convert to float for ROCm compatibility
+        if args.rocm:
+            audio = audio.float()
+            # Normalize to [-1, 1] range
+            if audio.abs().max() > 1.0:
+                audio = audio / audio.abs().max()
+
         if sr != SAMPLE_RATE:
             audio = torchaudio.functional.resample(audio, sr, SAMPLE_RATE)
         audio = audio.unsqueeze(0)

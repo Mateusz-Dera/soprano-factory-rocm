@@ -90,6 +90,8 @@ Soprano-Factory expects input data in LJSpeech format. Please see `example_datas
 
 ```
 python generate_dataset.py --input-dir path/to/files
+# or for ROCm (AMD)
+python generate_dataset.py --input-dir path/to/files --rocm
 
 Args:
   --input-dir:  Path to directory of LJSpeech-style dataset. If none is provided this defaults to the provided example dataset.
