@@ -75,9 +75,8 @@ uv pip install -r requirements.txt
 uv pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/rocm6.4
 ```
 
-**Note:** ROCm support has not been tested on Windows.
-
 If using Windows with CUDA you may need to reinstall Pytorch to have CUDA support.
+ROCm support has not been tested on Windows.
 
 ---
 
