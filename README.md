@@ -26,7 +26,7 @@
 - **<1 GB** memory usage with a compact 80M parameter architecture
 - **Infinite generation length** with automatic text splitting
 - Highly expressive, crystal clear audio generation at **32kHz**
-- Widespread support for CUDA, CPU, and MPS devices on Windows, Linux, and Mac
+- Widespread support for CUDA, ROCm, CPU, and MPS devices on Windows, Linux, and Mac
 - Supports WebUI, CLI, and OpenAI-compatible endpoint for easy and production-ready inference
 
 ---
